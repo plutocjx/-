@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实时金银价格追踪</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 头部 -->
+        <header class="header">
+            <h1 class="title">实时金银价格追踪</h1>
+            <div class="metal-switch">
+                <button class="switch-btn active" data-metal="gold">黄金</button>
+                <button class="switch-btn" data-metal="silver">白银</button>
+            </div>
+        </header>
+
+        <!-- 价格卡片区域 -->
+        <div class="price-cards">
+            <!-- 黄金价格卡片 -->
+            <div class="price-card gold-card active" id="goldCard">
+                <div class="card-header">
+                    <h2 class="metal-name">黄金 (Gold)</h2>
+                    <button class="refresh-btn" id="refreshBtn" title="手动刷新">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="price-display">
+                    <div class="price-group">
+                        <div class="price-label">美元/盎司</div>
+                        <div class="price-value" id="goldPriceOz">--</div>
+                        <div class="price-change" id="goldChangeOz">
+                            <span class="change-value">--</span>
+                            <span class="change-percent">--</span>
+                        </div>
+                    </div>
+                    <div class="price-group">
+                        <div class="price-label">人民币/克</div>
+                        <div class="price-value" id="goldPriceGram">--</div>
+                        <div class="price-change" id="goldChangeGram">
+                            <span class="change-value">--</span>
+                            <span class="change-percent">--</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="update-time" id="goldUpdateTime">更新时间: --</div>
+            </div>
+
+            <!-- 白银价格卡片 -->
+            <div class="price-card silver-card" id="silverCard">
+                <div class="card-header">
+                    <h2 class="metal-name">白银 (Silver)</h2>
+                    <button class="refresh-btn" id="refreshBtnSilver" title="手动刷新">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="price-display">
+                    <div class="price-group">
+                        <div class="price-label">美元/盎司</div>
+                        <div class="price-value" id="silverPriceOz">--</div>
+                        <div class="price-change" id="silverChangeOz">
+                            <span class="change-value">--</span>
+                            <span class="change-percent">--</span>
+                        </div>
+                    </div>
+                    <div class="price-group">
+                        <div class="price-label">人民币/克</div>
+                        <div class="price-value" id="silverPriceGram">--</div>
+                        <div class="price-change" id="silverChangeGram">
+                            <span class="change-value">--</span>
+                            <span class="change-percent">--</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="update-time" id="silverUpdateTime">更新时间: --</div>
+            </div>
+        </div>
+
+        <!-- K线图区域 -->
+        <div class="chart-section">
+            <div class="chart-header">
+                <h3 class="chart-title" id="chartTitle">黄金价格走势</h3>
+                <div class="timeframe-selector">
+                    <button class="timeframe-btn" data-timeframe="1m">1分钟</button>
+                    <button class="timeframe-btn" data-timeframe="5m">5分钟</button>
+                    <button class="timeframe-btn" data-timeframe="1h">1小时</button>
+                    <button class="timeframe-btn active" data-timeframe="1d">日线</button>
+                    <button class="timeframe-btn" data-timeframe="1w">周线</button>
+                    <button class="timeframe-btn" data-timeframe="1M">月线</button>
+                </div>
+            </div>
+            <div class="chart-container" id="chartContainer">
+                <div class="chart-loading" id="chartLoading">
+                    <div class="spinner"></div>
+                    <p>加载中...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 状态提示 -->
+        <div class="status-message" id="statusMessage"></div>
+
+        <!-- 页脚 -->
+        <footer class="footer">
+            <p>数据来源: Metals-API | 更新频率: 60秒 | 仅供参考，不构成投资建议</p>
+            <p class="disclaimer">免责声明: 价格数据可能存在延迟，请以实际交易价格为准</p>
+        </footer>
+    </div>
+
+    <!-- CDN库 -->
+    <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+
+    <!-- 项目脚本 -->
+    <script src="js/config.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/priceManager.js"></script>
+    <script src="js/chartManager.js"></script>
+    <script src="js/uiController.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>

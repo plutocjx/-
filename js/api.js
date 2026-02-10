@@ -114,9 +114,9 @@ class API {
         };
     }
 
-    // 生成演示历史数据
-    getDemoHistoricalData(metal, timeframe, limit) {
-        const basePrice = CONFIG.demo.basePrice[metal];
+    // 生成演示历史数据（可传入自定义基础价格）
+    getDemoHistoricalData(metal, timeframe, limit, customBasePrice) {
+        const basePrice = customBasePrice || CONFIG.demo.basePrice[metal];
         const data = [];
         const now = Date.now();
 
@@ -232,9 +232,17 @@ class API {
 
     // 从真实API获取历史数据
     async fetchRealHistoricalData(metal, timeframe, limit, apiType) {
-        // 由于免费API通常不提供详细的历史K线数据
-        // 这里返回演示数据，实际使用时需要根据具体API调整
-        console.warn('真实历史数据API未实现，使用演示数据');
+        // 免费API不提供详细的历史K线数据
+        // 先获取当前真实价格作为基准，再生成模拟K线
+        try {
+            const currentData = await this.fetchRealPrice(metal, apiType);
+            if (currentData && currentData.priceOz) {
+                console.log(`使用真实价格 $${currentData.priceOz} 作为K线基准`);
+                return this.getDemoHistoricalData(metal, timeframe, limit, currentData.priceOz);
+            }
+        } catch (error) {
+            console.warn('获取真实价格失败，K线使用默认基准:', error);
+        }
         return this.getDemoHistoricalData(metal, timeframe, limit);
     }
 

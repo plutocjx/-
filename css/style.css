@@ -18,9 +18,9 @@
     --silver-color: #c0c0c0;
     --silver-glow: rgba(192, 192, 192, 0.3);
 
-    /* 涨跌色 */
-    --color-up: #26a69a;
-    --color-down: #ef5350;
+    /* 涨跌色（中国标准：红涨绿跌） */
+    --color-up: #ef5350;
+    --color-down: #26a69a;
 
     /* 文字颜色 */
     --text-primary: #d1d4dc;

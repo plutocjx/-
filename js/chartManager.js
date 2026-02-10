@@ -1,5 +1,8 @@
 // 图表管理模块 - 使用Lightweight Charts
 class ChartManager {
+    // 北京时间偏移量：UTC+8 = 8小时 = 28800秒
+    static BEIJING_OFFSET = 8 * 3600;
+
     constructor(containerId) {
         this.container = document.getElementById(containerId);
         this.chart = null;
@@ -9,6 +12,19 @@ class ChartManager {
         this.isLoading = false;
 
         this.init();
+    }
+
+    // 将UTC时间戳转换为北京时间（供Lightweight Charts显示）
+    toBeijingTime(utcTimestamp) {
+        return utcTimestamp + ChartManager.BEIJING_OFFSET;
+    }
+
+    // 批量转换数据的时间戳为北京时间
+    convertDataToBeijing(data) {
+        return data.map(item => ({
+            ...item,
+            time: this.toBeijingTime(item.time)
+        }));
     }
 
     // 初始化图表
@@ -94,7 +110,9 @@ class ChartManager {
 
             // 更新图表
             if (data && data.length > 0) {
-                this.candlestickSeries.setData(data);
+                // 将UTC时间戳转换为北京时间显示
+                const beijingData = this.convertDataToBeijing(data);
+                this.candlestickSeries.setData(beijingData);
 
                 // 自动缩放到合适的视图
                 this.chart.timeScale().fitContent();
@@ -152,8 +170,8 @@ class ChartManager {
         }
 
         try {
-            // 获取当前时间戳（秒）
-            const timestamp = Math.floor(Date.now() / 1000);
+            // 获取当前时间戳（秒），转换为北京时间
+            const timestamp = this.toBeijingTime(Math.floor(Date.now() / 1000));
 
             // 创建新的数据点
             const newPoint = {

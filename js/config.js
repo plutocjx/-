@@ -25,7 +25,8 @@ const CONFIG = {
     // 单位转换
     conversion: {
         ozToGram: 31.1035, // 1盎司 = 31.1035克
-        usdToCny: 7.3 // 美元到人民币默认汇率（启动后会自动从API获取实时汇率）
+        usdToCny: 7.3, // 美元到人民币默认汇率（启动后会自动从API获取实时汇率）
+        domesticPremium: 1.01 // 国内溢价系数（上海金通常比国际现货高约1%）
     },
 
     // 更新频率

@@ -9,26 +9,47 @@ class API {
         this.lastKnownPrice = { gold: null, silver: null };
     }
 
-    // 获取实时汇率
+    // 获取实时汇率（多源）
     async fetchExchangeRate() {
         const cacheKey = 'exchange_rate_usd_cny';
         const cached = this.getFromCache(cacheKey);
         if (cached) return cached;
 
-        try {
-            const response = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
-            if (response.ok) {
-                const data = await response.json();
-                const rate = data.rates.CNY;
-                this.usdToCny = rate;
-                CONFIG.conversion.usdToCny = rate;
-                this.setCache(cacheKey, rate, 3600000);
-                console.log(`汇率已更新: 1 USD = ${rate} CNY`);
-                return rate;
+        // 依次尝试多个汇率源
+        const sources = [
+            async () => {
+                const r = await fetch('https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/usd.json');
+                const d = await r.json();
+                return d.usd.cny;
+            },
+            async () => {
+                const r = await fetch('https://open.er-api.com/v6/latest/USD');
+                const d = await r.json();
+                return d.rates.CNY;
+            },
+            async () => {
+                const r = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
+                const d = await r.json();
+                return d.rates.CNY;
             }
-        } catch (e) {
-            console.warn('获取汇率失败，使用默认汇率:', this.usdToCny);
+        ];
+
+        for (const source of sources) {
+            try {
+                const rate = await source();
+                if (rate && rate > 0) {
+                    this.usdToCny = rate;
+                    CONFIG.conversion.usdToCny = rate;
+                    this.setCache(cacheKey, rate, 3600000);
+                    console.log(`汇率已更新: 1 USD = ${rate} CNY`);
+                    return rate;
+                }
+            } catch (e) {
+                continue;
+            }
         }
+
+        console.warn('所有汇率源均失败，使用默认汇率:', this.usdToCny);
         return this.usdToCny;
     }
 
@@ -128,7 +149,9 @@ class API {
 
     // 构建标准价格结果
     buildPriceResult(metal, priceOz) {
-        const pricePerGramCNY = (priceOz / CONFIG.conversion.ozToGram) * CONFIG.conversion.usdToCny;
+        const pricePerGramUSD = priceOz / CONFIG.conversion.ozToGram;
+        const premium = CONFIG.conversion.domesticPremium || 1;
+        const pricePerGramCNY = pricePerGramUSD * CONFIG.conversion.usdToCny * premium;
         return {
             metal,
             price: priceOz,

@@ -2,125 +2,184 @@
 class API {
     constructor() {
         this.cache = new Map();
-        this.requestQueue = [];
-        this.isRequesting = false;
         this.lastRequestTime = 0;
-        this.minRequestInterval = 1000; // 最小请求间隔1秒
-        this.usdToCny = CONFIG.conversion.usdToCny; // 初始汇率
+        this.minRequestInterval = 1000;
+        this.usdToCny = CONFIG.conversion.usdToCny;
+        // 保存最后获取到的真实价格，供K线图使用
+        this.lastKnownPrice = { gold: null, silver: null };
     }
 
     // 获取实时汇率
     async fetchExchangeRate() {
         const cacheKey = 'exchange_rate_usd_cny';
         const cached = this.getFromCache(cacheKey);
-        if (cached) {
-            return cached;
-        }
+        if (cached) return cached;
 
         try {
-            // 使用免费汇率API
             const response = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
             if (response.ok) {
                 const data = await response.json();
                 const rate = data.rates.CNY;
                 this.usdToCny = rate;
                 CONFIG.conversion.usdToCny = rate;
-                // 汇率缓存1小时
                 this.setCache(cacheKey, rate, 3600000);
                 console.log(`汇率已更新: 1 USD = ${rate} CNY`);
                 return rate;
             }
-        } catch (error) {
+        } catch (e) {
             console.warn('获取汇率失败，使用默认汇率:', this.usdToCny);
         }
         return this.usdToCny;
     }
 
-    // 获取实时价格
+    // 获取实时价格（多数据源自动切换）
     async getCurrentPrice(metal = 'gold') {
         const cacheKey = `current_${metal}`;
-
-        // 检查缓存
         const cached = this.getFromCache(cacheKey);
-        if (cached) {
-            return cached;
-        }
+        if (cached) return cached;
 
-        // 确保汇率是最新的
         await this.fetchExchangeRate();
 
-        // 根据配置选择API
         const apiType = CONFIG.getCurrentApi();
+        let data = null;
 
-        let data;
-        if (apiType === 'demo') {
-            data = this.getDemoPrice(metal);
-        } else {
-            data = await this.fetchRealPrice(metal, apiType);
+        if (apiType !== 'demo') {
+            // 依次尝试多个数据源
+            data = await this.tryMetalsLiveApi(metal)
+                || await this.tryGoldApi(metal)
+                || await this.tryGoldApiViaProxy(metal);
         }
 
-        // 缓存结果
+        // 所有API都失败，使用演示数据
+        if (!data) {
+            console.warn(`所有API均失败，${metal}使用演示数据`);
+            data = this.getDemoPrice(metal);
+        }
+
+        // 保存最后已知价格
+        this.lastKnownPrice[metal] = data.priceOz;
         this.setCache(cacheKey, data);
         return data;
     }
 
-    // 获取历史K线数据
-    async getHistoricalData(metal = 'gold', timeframe = '1d', limit = 100) {
-        const cacheKey = `historical_${metal}_${timeframe}_${limit}`;
+    // 数据源1: metals.live（免费，无需密钥）
+    async tryMetalsLiveApi(metal) {
+        try {
+            const response = await fetch('https://api.metals.live/v1/spot');
+            if (!response.ok) return null;
 
-        // 检查缓存
-        const cached = this.getFromCache(cacheKey);
-        if (cached) {
-            return cached;
+            const list = await response.json();
+            // 返回格式: [{gold: 5028.5, silver: 32.1, ...}]
+            const item = list[0] || list;
+            const priceOz = metal === 'gold' ? item.gold : item.silver;
+
+            if (!priceOz) return null;
+            console.log(`metals.live ${metal}: $${priceOz}`);
+            return this.buildPriceResult(metal, priceOz);
+        } catch (e) {
+            console.warn('metals.live API失败:', e.message);
+            return null;
         }
-
-        // 根据配置选择API
-        const apiType = CONFIG.getCurrentApi();
-
-        let data;
-        if (apiType === 'demo') {
-            data = this.getDemoHistoricalData(metal, timeframe, limit);
-        } else {
-            data = await this.fetchRealHistoricalData(metal, timeframe, limit, apiType);
-        }
-
-        // 缓存结果（历史数据缓存时间更长）
-        this.setCache(cacheKey, data, 300000); // 5分钟
-        return data;
     }
 
-    // 获取演示价格数据
-    getDemoPrice(metal) {
-        const basePrice = CONFIG.demo.basePrice[metal];
-        const volatility = CONFIG.demo.volatility;
+    // 数据源2: GoldAPI（直连）
+    async tryGoldApi(metal) {
+        try {
+            const symbol = metal === 'gold' ? 'XAU' : 'XAG';
+            const response = await fetch(`${CONFIG.api.endpoints.goldApi}/${symbol}/USD`, {
+                headers: { 'x-access-token': CONFIG.api.goldApiKey }
+            });
+            if (!response.ok) return null;
 
-        // 生成随机波动
-        const change = basePrice * (Math.random() - 0.5) * 2 * volatility;
-        const currentPrice = basePrice + change;
+            const data = await response.json();
+            console.log(`GoldAPI ${metal}: $${data.price}`);
+            const result = this.buildPriceResult(metal, data.price);
+            result.change = data.ch || 0;
+            result.changePercent = data.chp || 0;
+            return result;
+        } catch (e) {
+            console.warn('GoldAPI直连失败:', e.message);
+            return null;
+        }
+    }
 
-        // 计算涨跌
-        const changePercent = (change / basePrice) * 100;
+    // 数据源3: GoldAPI（通过CORS代理）
+    async tryGoldApiViaProxy(metal) {
+        try {
+            const symbol = metal === 'gold' ? 'XAU' : 'XAG';
+            const targetUrl = `${CONFIG.api.endpoints.goldApi}/${symbol}/USD`;
+            const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl + '?x-access-token=' + CONFIG.api.goldApiKey)}`;
 
+            const response = await fetch(proxyUrl);
+            if (!response.ok) return null;
+
+            const data = await response.json();
+            if (!data.price) return null;
+            console.log(`GoldAPI(代理) ${metal}: $${data.price}`);
+            const result = this.buildPriceResult(metal, data.price);
+            result.change = data.ch || 0;
+            result.changePercent = data.chp || 0;
+            return result;
+        } catch (e) {
+            console.warn('GoldAPI代理失败:', e.message);
+            return null;
+        }
+    }
+
+    // 构建标准价格结果
+    buildPriceResult(metal, priceOz) {
+        const pricePerGramCNY = (priceOz / CONFIG.conversion.ozToGram) * CONFIG.conversion.usdToCny;
         return {
-            metal: metal,
-            price: currentPrice,
-            priceOz: currentPrice,
-            priceGram: currentPrice / CONFIG.conversion.ozToGram * CONFIG.conversion.usdToCny,
-            change: change,
-            changePercent: changePercent,
+            metal,
+            price: priceOz,
+            priceOz,
+            priceGram: pricePerGramCNY,
+            change: 0,
+            changePercent: 0,
             timestamp: Date.now(),
             currency: 'USD',
             unit: 'oz'
         };
     }
 
-    // 生成演示历史数据（可传入自定义基础价格）
-    getDemoHistoricalData(metal, timeframe, limit, customBasePrice) {
+    // 获取历史K线数据
+    async getHistoricalData(metal = 'gold', timeframe = '1d', limit = 100) {
+        const cacheKey = `historical_${metal}_${timeframe}_${limit}`;
+        const cached = this.getFromCache(cacheKey);
+        if (cached) return cached;
+
+        // 使用最后已知的真实价格作为K线基准
+        let basePrice = this.lastKnownPrice[metal];
+
+        // 如果还没有真实价格，尝试获取一次
+        if (!basePrice) {
+            try {
+                const priceData = await this.getCurrentPrice(metal);
+                basePrice = priceData.priceOz;
+            } catch (e) {
+                basePrice = null;
+            }
+        }
+
+        const data = this.generateKlineData(metal, timeframe, limit, basePrice);
+        this.setCache(cacheKey, data, 300000);
+        return data;
+    }
+
+    // 获取演示价格数据
+    getDemoPrice(metal) {
+        const basePrice = CONFIG.demo.basePrice[metal];
+        const change = basePrice * (Math.random() - 0.5) * 2 * CONFIG.demo.volatility;
+        const currentPrice = basePrice + change;
+        return this.buildPriceResult(metal, currentPrice);
+    }
+
+    // 生成K线数据
+    generateKlineData(metal, timeframe, limit, customBasePrice) {
         const basePrice = customBasePrice || CONFIG.demo.basePrice[metal];
         const data = [];
         const now = Date.now();
 
-        // 根据时间周期计算时间间隔
         const intervals = {
             '1m': 60 * 1000,
             '5m': 5 * 60 * 1000,
@@ -131,160 +190,55 @@ class API {
         };
 
         const interval = intervals[timeframe] || intervals['1d'];
+        const volatility = basePrice * 0.008; // 0.8%波动
 
-        // 生成K线数据
-        let currentPrice = basePrice;
+        let currentPrice = basePrice * (1 - 0.02); // 从略低于当前价开始
         for (let i = limit - 1; i >= 0; i--) {
             const time = now - (i * interval);
-
-            // 随机生成OHLC
-            const volatility = basePrice * 0.01; // 1%波动
+            const trend = (limit - i) / limit * 0.02; // 轻微上升趋势
             const open = currentPrice;
             const high = open + Math.random() * volatility;
             const low = open - Math.random() * volatility;
-            const close = low + Math.random() * (high - low);
+            const close = low + Math.random() * (high - low) + basePrice * trend * 0.001;
 
             data.push({
-                time: Math.floor(time / 1000), // Lightweight Charts使用秒级时间戳
+                time: Math.floor(time / 1000),
                 open: parseFloat(open.toFixed(2)),
                 high: parseFloat(high.toFixed(2)),
                 low: parseFloat(low.toFixed(2)),
                 close: parseFloat(close.toFixed(2))
             });
-
             currentPrice = close;
         }
 
+        // 确保最后一根K线的收盘价接近真实价格
+        if (data.length > 0 && customBasePrice) {
+            const last = data[data.length - 1];
+            last.close = parseFloat(customBasePrice.toFixed(2));
+            last.high = Math.max(last.high, last.close);
+            last.low = Math.min(last.low, last.close);
+        }
+
         return data;
-    }
-
-    // 从真实API获取价格（GoldAPI）
-    async fetchRealPrice(metal, apiType) {
-        try {
-            if (apiType === 'goldapi') {
-                // GoldAPI使用XAU（黄金）和XAG（白银）作为符号
-                const symbol = metal === 'gold' ? 'XAU' : 'XAG';
-                const response = await fetch(`${CONFIG.api.endpoints.goldApi}/${symbol}/USD`, {
-                    headers: {
-                        'x-access-token': CONFIG.api.goldApiKey
-                    }
-                });
-
-                if (!response.ok) {
-                    throw new Error(`API请求失败: ${response.status}`);
-                }
-
-                const data = await response.json();
-                console.log(`GoldAPI ${metal} 原始数据:`, data);
-
-                const priceOz = data.price;
-                const pricePerGramUSD = priceOz / CONFIG.conversion.ozToGram;
-                const pricePerGramCNY = pricePerGramUSD * CONFIG.conversion.usdToCny;
-
-                return {
-                    metal: metal,
-                    price: priceOz,
-                    priceOz: priceOz,
-                    priceGram: pricePerGramCNY,
-                    change: data.ch || 0,
-                    changePercent: data.chp || 0,
-                    prevClosePrice: data.prev_close_price || 0,
-                    openPrice: data.open_price || 0,
-                    highPrice: data.high_price || 0,
-                    lowPrice: data.low_price || 0,
-                    timestamp: Date.now(),
-                    currency: 'USD',
-                    unit: 'oz'
-                };
-            } else if (apiType === 'metalsapi') {
-                // Metals-API实现
-                const symbol = metal === 'gold' ? 'XAU' : 'XAG';
-                const response = await fetch(
-                    `${CONFIG.api.endpoints.metalsApi}/latest?access_key=${CONFIG.api.metalsApiKey}&base=USD&symbols=${symbol}`
-                );
-
-                if (!response.ok) {
-                    throw new Error(`API请求失败: ${response.status}`);
-                }
-
-                const data = await response.json();
-                const price = 1 / data.rates[symbol]; // 转换为USD/oz
-                const pricePerGramUSD = price / CONFIG.conversion.ozToGram;
-                const pricePerGramCNY = pricePerGramUSD * CONFIG.conversion.usdToCny;
-
-                return {
-                    metal: metal,
-                    price: price,
-                    priceOz: price,
-                    priceGram: pricePerGramCNY,
-                    change: 0, // Metals-API不提供涨跌数据
-                    changePercent: 0,
-                    timestamp: Date.now(),
-                    currency: 'USD',
-                    unit: 'oz'
-                };
-            }
-        } catch (error) {
-            console.error('获取真实价格失败，使用演示数据:', error);
-            return this.getDemoPrice(metal);
-        }
-    }
-
-    // 从真实API获取历史数据
-    async fetchRealHistoricalData(metal, timeframe, limit, apiType) {
-        // 免费API不提供详细的历史K线数据
-        // 先获取当前真实价格作为基准，再生成模拟K线
-        try {
-            const currentData = await this.fetchRealPrice(metal, apiType);
-            if (currentData && currentData.priceOz) {
-                console.log(`使用真实价格 $${currentData.priceOz} 作为K线基准`);
-                return this.getDemoHistoricalData(metal, timeframe, limit, currentData.priceOz);
-            }
-        } catch (error) {
-            console.warn('获取真实价格失败，K线使用默认基准:', error);
-        }
-        return this.getDemoHistoricalData(metal, timeframe, limit);
     }
 
     // 缓存管理
     getFromCache(key) {
         const cached = this.cache.get(key);
         if (!cached) return null;
-
-        const now = Date.now();
-        if (now - cached.timestamp > cached.ttl) {
+        if (Date.now() - cached.timestamp > cached.ttl) {
             this.cache.delete(key);
             return null;
         }
-
         return cached.data;
     }
 
     setCache(key, data, ttl = CONFIG.cache.ttl) {
-        this.cache.set(key, {
-            data: data,
-            timestamp: Date.now(),
-            ttl: ttl
-        });
+        this.cache.set(key, { data, timestamp: Date.now(), ttl });
     }
 
     clearCache() {
         this.cache.clear();
-    }
-
-    // 请求限流
-    async throttledRequest(requestFn) {
-        const now = Date.now();
-        const timeSinceLastRequest = now - this.lastRequestTime;
-
-        if (timeSinceLastRequest < this.minRequestInterval) {
-            await new Promise(resolve =>
-                setTimeout(resolve, this.minRequestInterval - timeSinceLastRequest)
-            );
-        }
-
-        this.lastRequestTime = Date.now();
-        return await requestFn();
     }
 }
 
